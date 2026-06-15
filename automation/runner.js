@@ -9,9 +9,10 @@
  *     (blob URL), TANPA dialog pilih lokasi file lagi. Karena itu kita cukup
  *     pakai Playwright download event (acceptDownloads: true) + download.saveAs().
  *
- * SELECTOR STRATEGY:
- *   Prioritas: role-based (getByRole/getByText) → CSS selector → fallback scan.
- *   Role-based lebih stabil di cross-environment (Windows/Linux, headed/headless).
+ * SELECTOR STRATEGY (3-tier, robust):
+ *   1. Role-based locator (getByRole) — paling stabil cross-environment
+ *   2. Text-based locator (getByText → parent click) — fallback kedua
+ *   3. CSS :has-text() selector — fallback ketiga (tanpa nth-child)
  *
  * @param {object} job  { id, preset, audio, mediaType, mediaPath, exportName }
  * @param {object} ctx  { emit }  emit(stage, percent, message, data)
@@ -26,11 +27,29 @@ async function sleep(ms) {
 }
 
 /**
- * Cari dan klik tombol upload berdasarkan teks/label (role-based).
- * Fallback ke CSS selector jika role-based gagal.
+ * Tunggu sampai React app selesai render (DOM stabil).
+ * Cek: aside.library-panel sudah muncul = sidebar sudah siap.
  */
-async function findUploadButton(page, cssSelector, labelTexts, ctx, label) {
-  // 1. Coba role-based: cari button yang teks-nya cocok
+async function waitForAppReady(page, ctx) {
+  ctx.emit('navigate', 50, 'Menunggu app selesai render...');
+  // Cek beberapa marker bahwa DOM sudah ready
+  try {
+    await page.waitForSelector('aside.library-panel', { state: 'attached', timeout: config.AUTOMATION.pageTimeout });
+  } catch (_) {
+    ctx.emit('navigate', 50, 'Warning: library-panel tidak ditemukan, coba lanjut...');
+  }
+  // Tunggu tambahan untuk React hydration & lazy-load
+  await sleep(2000);
+}
+
+/**
+ * Cari dan klik tombol upload berdasarkan teks/label (3-tier strategy).
+ * Tier 1: role-based button locator
+ * Tier 2: text-based (getByText → parent clickable)
+ * Tier 3: CSS :has-text() selector (tanpa nth-child)
+ */
+async function findUploadButton(page, cssSelector, labelTexts, ctx, label, typeKey) {
+  // 1. Role-based: cari button yang teks-nya cocok
   for (const text of labelTexts) {
     try {
       const btn = page.getByRole('button', { name: text, exact: false });
@@ -41,47 +60,64 @@ async function findUploadButton(page, cssSelector, labelTexts, ctx, label) {
     } catch (_) { /* lanjut */ }
   }
 
-  // 2. Coba getByText untuk elemen non-button yang mungkin clickable
+  // 2. Text-based: cari teks lalu klik parent/ancestor yang clickable
   for (const text of labelTexts) {
     try {
       const el = page.getByText(text, { exact: false });
       if ((await el.count()) > 0 && (await el.first().isVisible())) {
-        const parent = el.first().locator('..');
-        if ((await parent.count()) > 0) {
-          ctx.emit('upload', 10, `${label}: text-based ditemukan "${text}"`);
-          return parent;
-        }
+        // Coba klik teks langsung dulu (bisa jadi <button> atau <a>)
+        ctx.emit('upload', 10, `${label}: text-based ditemukan "${text}"`);
+        return el.first();
       }
     } catch (_) { /* lanjut */ }
   }
 
-  // 3. Fallback ke CSS selector
+  // 3. Fallback: CSS selector (sekarang menggunakan :has-text, bukan nth-child)
+  const robustSelector = (selectors.robustUploadSelectors && selectors.robustUploadSelectors[typeKey]) || cssSelector;
   ctx.emit('upload', 10, `${label}: fallback ke CSS selector`);
-  await page.waitForSelector(cssSelector, { state: 'visible', timeout: config.AUTOMATION.pageTimeout });
-  return page.locator(cssSelector).first();
+  await page.waitForSelector(robustSelector, { state: 'visible', timeout: config.AUTOMATION.pageTimeout });
+  return page.locator(robustSelector).first();
 }
 
 /**
  * Upload file dengan klik tombol lalu isi input[type=file] via filechooser.
+ * Punya retry jika step tertentu gagal (browser crash, timeout, dll).
  */
 async function clickAndUpload(page, cssSelector, filePath, ctx, label, typeKey) {
-  ctx.emit('upload', 0, `${label}: mencari tombol upload...`);
+  const maxRetry = config.AUTOMATION.maxRetries || 1;
 
-  // Ambil label teks untuk role-based fallback
-  const labelTexts = (selectors.uploadButtonLabels && selectors.uploadButtonLabels[typeKey]) || [];
+  for (let attempt = 0; attempt <= maxRetry; attempt++) {
+    try {
+      ctx.emit('upload', 0, `${label}: mencari tombol upload...`);
 
-  const btn = await findUploadButton(page, cssSelector, labelTexts, ctx, label);
-  ctx.emit('upload', 20, `${label}: membuka file picker...`);
+      // Ambil label teks untuk role-based fallback
+      const labelTexts = (selectors.uploadButtonLabels && selectors.uploadButtonLabels[typeKey]) || [];
 
-  const [fileChooser] = await Promise.all([
-    page.waitForEvent('filechooser', { timeout: config.AUTOMATION.uploadTimeout }),
-    btn.click(),
-  ]);
-  ctx.emit('upload', 40, `${label}: mengirim file...`);
-  await fileChooser.setFiles(filePath);
-  ctx.emit('upload', 60, `${label}: file terkirim, menunggu proses...`);
-  await sleep(2500);
-  ctx.emit('upload', 100, `${label}: selesai`);
+      const btn = await findUploadButton(page, cssSelector, labelTexts, ctx, label, typeKey);
+      ctx.emit('upload', 20, `${label}: membuka file picker...`);
+
+      const [fileChooser] = await Promise.all([
+        page.waitForEvent('filechooser', { timeout: config.AUTOMATION.uploadTimeout }),
+        btn.click(),
+      ]);
+      ctx.emit('upload', 40, `${label}: mengirim file...`);
+      await fileChooser.setFiles(filePath);
+      ctx.emit('upload', 60, `${label}: file terkirim, menunggu proses...`);
+      await sleep(2500);
+      ctx.emit('upload', 100, `${label}: selesai`);
+      return; // sukses, keluar dari retry loop
+    } catch (err) {
+      const isCrash = (err.message || '').includes('Target crashed') ||
+                      (err.message || '').includes('Target closed') ||
+                      (err.message || '').includes('Browser closed');
+      if (attempt < maxRetry && isCrash) {
+        ctx.emit('upload', 0, `${label}: target crashed, mencoba ulang (${attempt + 1}/${maxRetry})...`);
+        await sleep(3000);
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 /**
@@ -183,17 +219,23 @@ async function runAutomation(job, ctx) {
       '--no-sandbox',               // diperlukan di banyak VPS Linux
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',    // hindari crash karena /dev/shm kecil di VPS
+      '--disable-software-rasterizer', // hindari crash GPU di headless
+      '--disable-extensions',       // kurangi memory usage
+      '--js-flags=--max-old-space-size=512', // limit JS heap, kurangi OOM crash
+      '--single-process',           // kurangi proses anak (hemat memory)
     ],
   });
   const page = await browser.newPage({
-    viewport: { width: 1440, height: 900 },
+    viewport: { width: 1280, height: 800 },  // resolusi lebih kecil = lebih hemat memory
     acceptDownloads: true,
   });
 
   try {
     // 1. Buka URL
     ctx.emit('navigate', 0, `Membuka ${TARGET_URL}`);
-    await page.goto(TARGET_URL, { waitUntil: 'networkidle', timeout: AUTOMATION.pageTimeout });
+    await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: AUTOMATION.pageTimeout });
+    // Tunggu app React selesai render (library-panel = sidebar sudah muncul)
+    await waitForAppReady(page, ctx);
     ctx.emit('navigate', 100, 'Halaman siap');
 
     // 2. Upload preset
