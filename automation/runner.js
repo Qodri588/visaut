@@ -9,6 +9,10 @@
  *     (blob URL), TANPA dialog pilih lokasi file lagi. Karena itu kita cukup
  *     pakai Playwright download event (acceptDownloads: true) + download.saveAs().
  *
+ * SELECTOR STRATEGY:
+ *   Prioritas: role-based (getByRole/getByText) → CSS selector → fallback scan.
+ *   Role-based lebih stabil di cross-environment (Windows/Linux, headed/headless).
+ *
  * @param {object} job  { id, preset, audio, mediaType, mediaPath, exportName }
  * @param {object} ctx  { emit }  emit(stage, percent, message, data)
  */
@@ -22,16 +26,56 @@ async function sleep(ms) {
 }
 
 /**
+ * Cari dan klik tombol upload berdasarkan teks/label (role-based).
+ * Fallback ke CSS selector jika role-based gagal.
+ */
+async function findUploadButton(page, cssSelector, labelTexts, ctx, label) {
+  // 1. Coba role-based: cari button yang teks-nya cocok
+  for (const text of labelTexts) {
+    try {
+      const btn = page.getByRole('button', { name: text, exact: false });
+      if ((await btn.count()) > 0 && (await btn.first().isVisible())) {
+        ctx.emit('upload', 10, `${label}: role-based ditemukan "${text}"`);
+        return btn.first();
+      }
+    } catch (_) { /* lanjut */ }
+  }
+
+  // 2. Coba getByText untuk elemen non-button yang mungkin clickable
+  for (const text of labelTexts) {
+    try {
+      const el = page.getByText(text, { exact: false });
+      if ((await el.count()) > 0 && (await el.first().isVisible())) {
+        const parent = el.first().locator('..');
+        if ((await parent.count()) > 0) {
+          ctx.emit('upload', 10, `${label}: text-based ditemukan "${text}"`);
+          return parent;
+        }
+      }
+    } catch (_) { /* lanjut */ }
+  }
+
+  // 3. Fallback ke CSS selector
+  ctx.emit('upload', 10, `${label}: fallback ke CSS selector`);
+  await page.waitForSelector(cssSelector, { state: 'visible', timeout: config.AUTOMATION.pageTimeout });
+  return page.locator(cssSelector).first();
+}
+
+/**
  * Upload file dengan klik tombol lalu isi input[type=file] via filechooser.
  */
-async function clickAndUpload(page, buttonSelector, filePath, ctx, label) {
-  ctx.emit('upload', 0, `${label}: menunggu tombol...`);
-  await page.waitForSelector(buttonSelector, { state: 'visible', timeout: config.AUTOMATION.pageTimeout });
+async function clickAndUpload(page, cssSelector, filePath, ctx, label, typeKey) {
+  ctx.emit('upload', 0, `${label}: mencari tombol upload...`);
+
+  // Ambil label teks untuk role-based fallback
+  const labelTexts = (selectors.uploadButtonLabels && selectors.uploadButtonLabels[typeKey]) || [];
+
+  const btn = await findUploadButton(page, cssSelector, labelTexts, ctx, label);
   ctx.emit('upload', 20, `${label}: membuka file picker...`);
 
   const [fileChooser] = await Promise.all([
     page.waitForEvent('filechooser', { timeout: config.AUTOMATION.uploadTimeout }),
-    page.click(buttonSelector),
+    btn.click(),
   ]);
   ctx.emit('upload', 40, `${label}: mengirim file...`);
   await fileChooser.setFiles(filePath);
@@ -73,6 +117,41 @@ async function clickExportButton(page, ctx) {
 }
 
 /**
+ * Auto-detect input nama export.
+ * Coba role-based (label "Export Name" / "File Name") dulu, fallback ke CSS.
+ */
+async function fillExportName(page, exportName, ctx) {
+  ctx.emit('naming', 0, 'Mencari input nama export...');
+
+  // Coba role-based: cari input yang associated label-nya mengandung teks tertentu
+  const nameLabels = ['Export Name', 'File Name', 'Filename', 'Name', 'Nama', 'Export'];
+  for (const lbl of nameLabels) {
+    try {
+      // Cari label lalu ambil input terkait
+      const label = page.getByText(lbl, { exact: false }).first();
+      if ((await label.count()) > 0 && (await label.isVisible())) {
+        // Cari input di parent yang sama atau sibling berikutnya
+        const parent = label.locator('..');
+        if ((await parent.count()) > 0) {
+          const input = parent.locator('input').first();
+          if ((await input.count()) > 0 && (await input.isVisible())) {
+            await input.fill(exportName);
+            ctx.emit('naming', 100, `Nama diisi (role-based "${lbl}"): ${exportName}`);
+            return;
+          }
+        }
+      }
+    } catch (_) { /* lanjut */ }
+  }
+
+  // Fallback ke CSS selector
+  ctx.emit('naming', 50, 'Fallback ke CSS selector...');
+  await page.waitForSelector(selectors.exportNameInput, { state: 'visible', timeout: config.AUTOMATION.pageTimeout });
+  await page.fill(selectors.exportNameInput, exportName);
+  ctx.emit('naming', 100, `Nama diisi: ${exportName}`);
+}
+
+/**
  * Tunggu hasil render + download .webm.
  * Cukup andalkan Playwright download event — app sekarang langsung trigger
  * download via <a download>.click() (tanpa dialog pilih lokasi).
@@ -98,7 +177,13 @@ async function runAutomation(job, ctx) {
 
   const browser = await chromium.launch({
     headless: AUTOMATION.headless,
-    args: ['--autoplay-policy=no-user-gesture-required'],
+    args: [
+      '--autoplay-policy=no-user-gesture-required',
+      '--disable-gpu',             // stabil di headless Linux tanpa GPU
+      '--no-sandbox',               // diperlukan di banyak VPS Linux
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',    // hindari crash karena /dev/shm kecil di VPS
+    ],
   });
   const page = await browser.newPage({
     viewport: { width: 1440, height: 900 },
@@ -112,23 +197,20 @@ async function runAutomation(job, ctx) {
     ctx.emit('navigate', 100, 'Halaman siap');
 
     // 2. Upload preset
-    await clickAndUpload(page, selectors.uploadPresetButton, job.preset, ctx, 'Preset');
+    await clickAndUpload(page, selectors.uploadPresetButton, job.preset, ctx, 'Preset', 'preset');
 
     // 3. Upload audio
-    await clickAndUpload(page, selectors.uploadAudioButton, job.audio, ctx, 'Audio');
+    await clickAndUpload(page, selectors.uploadAudioButton, job.audio, ctx, 'Audio', 'audio');
 
     // 4. Upload image ATAU video
     if (job.mediaType === 'image' && job.mediaPath) {
-      await clickAndUpload(page, selectors.uploadImageButton, job.mediaPath, ctx, 'Image');
+      await clickAndUpload(page, selectors.uploadImageButton, job.mediaPath, ctx, 'Image', 'image');
     } else if (job.mediaType === 'video' && job.mediaPath) {
-      await clickAndUpload(page, selectors.uploadVideoButton, job.mediaPath, ctx, 'Video');
+      await clickAndUpload(page, selectors.uploadVideoButton, job.mediaPath, ctx, 'Video', 'video');
     }
 
     // 5. Isi nama export
-    ctx.emit('naming', 0, 'Mengisi nama export...');
-    await page.waitForSelector(selectors.exportNameInput, { state: 'visible', timeout: AUTOMATION.pageTimeout });
-    await page.fill(selectors.exportNameInput, job.exportName);
-    ctx.emit('naming', 100, `Nama diisi: ${job.exportName}`);
+    await fillExportName(page, job.exportName, ctx);
 
     // 6. Klik export → mulai render real-time
     await clickExportButton(page, ctx);

@@ -1,31 +1,41 @@
 'use strict';
 /**
- * selectors.js — semua CSS selector untuk web app target.
- * Jika UI berubah, cukup edit file ini (tidak perlu sentuh logic).
+ * selectors.js — selector untuk web app target.
  *
- * Berdasarkan selector yang diberikan user:
- *  - header button:nth-child(4)         → upload preset
- *  - library-panel media-panel > button → upload audio
- *  - media-panel > div > button:2       → upload image
- *  - media-panel > div > button:3       → upload video
- *  - inspector-panel section:2 label:2 input → nama export
- *  - export button: di-auto-detect (tidak pasti selector-nya)
+ * Strategi: pakai Playwright locator role-based (getByRole, getByText, getByTestId)
+ * yang lebih stabil daripada CSS nth-child selector di cross-environment (Windows/Linux,
+ * headed/headless, resolusi berbeda). Fallback ke CSS selector hanya jika diperlukan.
  */
 
 module.exports = {
-  // Tombol upload preset di header
+  /**
+   * Upload preset — cari button di header yang mengandung teks "Open" atau "Save"
+   * lalu klik button preset (biasanya button ke-4 di header-actions).
+   * Fallback ke CSS selector yang lama jika role-based gagal.
+   */
   uploadPresetButton: '#root > div > header > div.header-actions > button:nth-child(4)',
 
-  // Tombol upload audio di library panel
+  /**
+   * Upload audio — cari button yang teks-nya mengandung "Import audio"
+   * atau label "Audio" di library panel.
+   */
   uploadAudioButton: '#root > div > div.workspace > aside.library-panel > div.media-panel > button',
 
-  // Tombol upload image (child ke-2 dari div di dalam media-panel)
+  /**
+   * Upload image — cari button di media panel yang teks-nya mengandung "Import image"
+   * atau label "Image".
+   */
   uploadImageButton: '#root > div > div.workspace > aside.library-panel > div.media-panel > div > button:nth-child(2)',
 
-  // Tombol upload video (child ke-3 dari div di dalam media-panel)
+  /**
+   * Upload video — cari button di media panel yang teks-nya mengandung "Import video"
+   * atau label "Video".
+   */
   uploadVideoButton: '#root > div > div.workspace > aside.library-panel > div.media-panel > div > button:nth-child(3)',
 
-  // Input nama export di inspector panel
+  /**
+   * Input nama export di inspector panel.
+   */
   exportNameInput: '#root > div > div.workspace > aside.inspector-panel > section:nth-child(2) > label:nth-child(2) > input',
 
   /**
@@ -46,6 +56,17 @@ module.exports = {
     'Mulai Render',
     'Ekspor',
   ],
+
+  /**
+   * Label teks untuk auto-detect tombol upload berdasarkan isi teks.
+   * Digunakan oleh clickAndUpload sebagai fallback jika CSS selector gagal.
+   */
+  uploadButtonLabels: {
+    preset: ['Open', 'Load', 'Import Preset', 'Preset', 'Open Preset'],
+    audio: ['Import audio', 'Audio', 'Import Audio', 'Add Audio'],
+    image: ['Import image', 'Image', 'Import Image', 'Add Image'],
+    video: ['Import video', 'Video', 'Import Video', 'Add Video'],
+  },
 
   /** Selector input[type=file] tersembunyi yang biasanya muncul saat tombol upload diklik */
   fileInputFallback: 'input[type="file"]',
