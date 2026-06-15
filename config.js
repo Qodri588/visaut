@@ -29,7 +29,7 @@ const EXT_CATEGORIES = {
 const FILE_MANAGER_DIRS = ['presets', 'audio', 'media', 'exports'];
 
 const SERVER = {
-  port: process.env.PORT || 3000,
+  port: process.env.PORT || 7576,
   host: process.env.HOST || '0.0.0.0',
 };
 
