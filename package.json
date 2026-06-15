@@ -1,0 +1,24 @@
+{
+  "name": "visual-automation",
+  "version": "1.0.0",
+  "description": "Cross-platform (Windows/Linux) file manager + browser automation for visual.farishitam777.workers.dev",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "postinstall": "playwright install chromium"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0",
+    "playwright": "^1.48.0",
+    "ffmpeg-static": "^5.2.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "multer": "^1.4.5-lts.1",
+    "mime": "^4.0.4"
+  }
+}

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visual Automation — File Manager & Job Runner</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🎬</span>
+      <div>
+        <h1>Visual Automation</h1>
+        <small>File manager + automation untuk <code>visual.farishitam777.workers.dev</code></small>
+      </div>
+    </div>
+    <div class="topbar-status">
+      <span id="wsStatus" class="pill pill-off">● offline</span>
+      <span id="serverInfo" class="pill"></span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ============ LEFT: File Manager ============ -->
+    <section class="panel panel-files">
+      <div class="panel-head">
+        <h2>📁 File Manager</h2>
+        <div class="actions">
+          <button id="btnUpload" class="btn btn-primary">⬆ Upload</button>
+          <button id="btnMkdir" class="btn">📁+ Folder</button>
+          <button id="btnRefresh" class="btn">↻</button>
+        </div>
+      </div>
+
+      <!-- Quick category tabs -->
+      <div class="cat-tabs" id="catTabs">
+        <button data-dir="presets" class="cat-tab active">⚙ Preset</button>
+        <button data-dir="audio" class="cat-tab">🎵 Audio</button>
+        <button data-dir="media" class="cat-tab">🖼 Media</button>
+        <button data-dir="exports" class="cat-tab">📦 Exports</button>
+      </div>
+
+      <div class="breadcrumb" id="breadcrumb"></div>
+
+      <div class="filelist-wrap">
+        <ul class="filelist" id="fileList"></ul>
+      </div>
+
+      <input type="file" id="fileInput" multiple hidden>
+    </section>
+
+    <!-- ============ MIDDLE: Job Launcher ============ -->
+    <section class="panel panel-launch">
+      <div class="panel-head">
+        <h2>🚀 Buat Job</h2>
+      </div>
+
+      <div class="form">
+        <label class="field">
+          <span>Preset <small>(.json/.preset)</small></span>
+          <div class="pick">
+            <input type="text" id="jobPreset" placeholder="presets/..." readonly>
+            <button class="btn btn-sm" data-pick="preset">Pilih</button>
+          </div>
+        </label>
+
+        <label class="field">
+          <span>Audio <small>(.mp3/.wav)</small></span>
+          <div class="pick">
+            <input type="text" id="jobAudio" placeholder="audio/..." readonly>
+            <button class="btn btn-sm" data-pick="audio">Pilih</button>
+          </div>
+        </label>
+
+        <div class="field">
+          <span>Media (opsional)</span>
+          <div class="seg" id="mediaTypeSeg">
+            <button data-mt="none" class="seg-btn active">Tanpa</button>
+            <button data-mt="image" class="seg-btn">🖼 Image</button>
+            <button data-mt="video" class="seg-btn">🎥 Video</button>
+          </div>
+          <div class="pick" id="mediaPick" style="margin-top:6px;display:none">
+            <input type="text" id="jobMedia" placeholder="(pilih tipe dulu)" readonly>
+            <button class="btn btn-sm" data-pick="media">Pilih</button>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Nama Export <small>(tanpa ekstensi)</small></span>
+          <input type="text" id="jobName" placeholder="video-final-01">
+        </label>
+
+        <button id="btnRunJob" class="btn btn-primary btn-block">▶ Jalankan Job</button>
+        <small class="hint">Output MP4 akan muncul di folder <b>exports</b>.</small>
+      </div>
+    </section>
+
+    <!-- ============ RIGHT: Jobs & Progress ============ -->
+    <section class="panel panel-jobs">
+      <div class="panel-head">
+        <h2>⚙ Job & Progress</h2>
+        <div class="actions">
+          <button id="btnClearJobs" class="btn btn-sm">Bersihkan selesai</button>
+        </div>
+      </div>
+      <div class="jobs-wrap">
+        <div id="jobList" class="job-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal untuk file picker -->
+  <div class="modal" id="pickerModal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3 id="pickerTitle">Pilih file</h3>
+        <button class="btn btn-sm" id="pickerClose">✕</button>
+      </div>
+      <ul class="picker-list" id="pickerList"></ul>
+    </div>
+  </div>
+
+  <!-- Log drawer (per job) -->
+  <div class="modal" id="logModal" hidden>
+    <div class="modal-card modal-wide">
+      <div class="modal-head">
+        <h3>Log Job <span id="logJobId"></span></h3>
+        <button class="btn btn-sm" id="logClose">✕</button>
+      </div>
+      <pre class="log-body" id="logBody"></pre>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

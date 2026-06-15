@@ -1,0 +1,5 @@
+node_modules/ 
+storage/ 
+_downloads/ 
+_probe.js 
+_shot_*.png 
